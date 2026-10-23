@@ -143,6 +143,94 @@
       border-top: 8px solid #ffffff;
       margin-top: -1px;
     }
+
+    /* Marcador fijo del garaje (C. Cartagena, 113): indica si el coche Grande está dentro o no */
+    .garage-marker { pointer-events: none !important; }
+    .garage-marker .garage-pin-body { pointer-events: auto; cursor: pointer; }
+
+    .garage-pin {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      filter: drop-shadow(0 6px 10px rgba(15, 23, 42, 0.35));
+    }
+
+    .garage-pin-body {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #ffffff;
+      color: #0f172a;
+      padding: 4px 5px 4px 4px;
+      border-radius: 14px;
+      white-space: nowrap;
+    }
+
+    .garage-pin.is-free .garage-pin-body { padding-right: 12px; }
+
+    .garage-pin-ico {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      background: #64748b;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.15);
+    }
+
+    .garage-pin-ico svg { width: 21px; height: 21px; }
+
+    .garage-pin.is-occupied .garage-pin-ico {
+      background: #f59e0b;
+      animation: garage-glow 2.4s ease-out infinite;
+    }
+
+    .garage-pin-text { display: flex; flex-direction: column; line-height: 1.15; }
+    .garage-pin-text b { font-size: 13px; font-weight: 800; letter-spacing: -0.01em; }
+    .garage-pin-text small { font-size: 10.5px; font-weight: 700; color: #64748b; }
+    .garage-pin.is-occupied .garage-pin-text small { color: #b45309; }
+
+    .garage-pin-car {
+      width: 36px;
+      height: 26px;
+      border-radius: 9px;
+      background: var(--c);
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 4px;
+    }
+
+    .garage-pin-tail {
+      width: 0;
+      height: 0;
+      border-left: 7px solid transparent;
+      border-right: 7px solid transparent;
+      border-top: 8px solid #ffffff;
+      margin-top: -1px;
+    }
+
+    @keyframes garage-glow {
+      0%       { box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.15), 0 0 0 0 rgba(245, 158, 11, 0.55); }
+      70%, 100% { box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.15), 0 0 0 10px rgba(245, 158, 11, 0); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .garage-pin.is-occupied .garage-pin-ico { animation: none; }
+    }
+
+    /* Aviso flotante (sustituye a los alert() que bloquean la app) */
+    #toast {
+      top: calc(env(safe-area-inset-top) + 5.25rem);
+      transition: opacity 0.2s ease, transform 0.2s ease;
+    }
+    #toast.is-hidden { opacity: 0; transform: translate(-50%, -6px); pointer-events: none; }
   </style>
 </head>
 <body class="relative">
@@ -184,8 +272,19 @@
     <div id="pin-stem" class="w-1 h-3.5 bg-blue-600 mx-auto"></div>
   </div>
 
-  <!-- CAPA 3: Botones flotantes laterales (Centrar en coche, Bluetooth rápido y Mi GPS) -->
+  <!-- Aviso flotante no bloqueante -->
+  <div id="toast" role="status" aria-live="polite"
+    class="is-hidden absolute left-1/2 -translate-x-1/2 z-[700] max-w-[calc(100vw-2rem)] bg-slate-900/95 backdrop-blur-md text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-lg border border-white/15 truncate"></div>
+
+  <!-- CAPA 3: Botones flotantes laterales (Garaje, Bluetooth rápido y Mi GPS) -->
   <div class="absolute right-4 bottom-64 z-[600] flex flex-col gap-3">
+    <!-- Botón Ir al Garaje (el punto ámbar indica que el coche Grande está dentro) -->
+    <button onclick="flyToGarage()" title="Ver el garaje (C. Cartagena, 113)"
+      class="relative w-12 h-12 rounded-2xl bg-white text-amber-600 shadow-xl flex items-center justify-center border border-slate-200 active:scale-95 transition">
+      <span class="w-6 h-6" data-garage-icon></span>
+      <span id="garage-fab-dot" class="hidden absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-amber-400 border-2 border-white"></span>
+    </button>
+
     <!-- Botón de Aparcado Automático Bluetooth (coche Grande - BT_CAR_SISTEM) -->
     <button onclick="bluetoothAutoPark()" title="Aparcado rápido por Bluetooth (BT_CAR_SISTEM)"
       class="w-12 h-12 rounded-2xl bg-indigo-600 text-white shadow-xl flex flex-col items-center justify-center border-2 border-white active:scale-95 transition">
@@ -293,6 +392,19 @@
       label: "C. de la Constancia, 14"
     };
 
+    // Garaje familiar: C. Cartagena, 113 (geocodificado con ArcGIS y Nominatim, coinciden a <3 m)
+    const GARAGE = {
+      lat: 40.44089,
+      lng: -3.67470,
+      label: "C. Cartagena, 113",
+      city: "Madrid 28002"
+    };
+    const GARAGE_STREET = `🏠 Garaje · ${GARAGE.label}`;
+    const GARAGE_NOTE = `Plaza de garaje · ${GARAGE.city}`;
+
+    // Icono del garaje: casa con puerta seccional
+    const GARAGE_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:100%;height:100%"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9v11h14V9"/><path d="M8.5 20v-7h7v7M8.5 15.5h7M8.5 18h7"/></svg>`;
+
     // 1. Estado inicial de los dos vehículos en Prosperidad
     const defaultData = {
       peugeot: {
@@ -344,6 +456,9 @@
     document.querySelectorAll('[data-car-icon]').forEach(el => {
       el.innerHTML = carSvg(el.dataset.carIcon);
     });
+    document.querySelectorAll('[data-garage-icon]').forEach(el => {
+      el.innerHTML = GARAGE_SVG;
+    });
     let activeCar = 'peugeot';
     let isUpdatingLocation = false;
     let userMarker = null;
@@ -352,7 +467,6 @@
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.has('p_garage') && urlParams.get('p_garage') === '1') {
       cars.peugeot.inGarage = true;
-      cars.peugeot.street = "🏠 Guardado en el Garaje";
       if (urlParams.has('p_time')) cars.peugeot.time = urlParams.get('p_time');
       if (urlParams.has('p_note')) cars.peugeot.note = urlParams.get('p_note');
     } else if (urlParams.has('peugeot')) {
@@ -375,6 +489,17 @@
         if (urlParams.has('h_street')) cars.hyundai.street = urlParams.get('h_street');
         if (urlParams.has('h_time')) cars.hyundai.time = urlParams.get('h_time');
         if (urlParams.has('h_note')) cars.hyundai.note = urlParams.get('h_note');
+      }
+    }
+
+    // Si el Grande está en el garaje, su posición es siempre la del garaje
+    // (también corrige los datos guardados con el texto antiguo "Guardado en el Garaje")
+    if (cars.peugeot.inGarage) {
+      cars.peugeot.lat = GARAGE.lat;
+      cars.peugeot.lng = GARAGE.lng;
+      cars.peugeot.street = GARAGE_STREET;
+      if (!cars.peugeot.note || cars.peugeot.note === "Plaza de garaje cubierta (No está en la calle)") {
+        cars.peugeot.note = GARAGE_NOTE;
       }
     }
     localStorage.setItem('family_parking_prosperidad_v2', JSON.stringify(cars));
@@ -422,6 +547,56 @@
     // 3. Marcadores de los dos coches en el mapa (Si el Peugeot está en garaje, no se dibuja en la calle)
     const markers = {};
 
+    // 3a. Marcador fijo del garaje: ámbar con el coche dentro, gris si está libre
+    function createGarageIcon() {
+      const inside = cars.peugeot.inGarage;
+      return L.divIcon({
+        className: 'garage-marker',
+        html: `<div class="garage-pin ${inside ? 'is-occupied' : 'is-free'}">
+                 <div class="garage-pin-body">
+                   <span class="garage-pin-ico">${GARAGE_SVG}</span>
+                   <span class="garage-pin-text"><b>Garaje</b><small>${inside ? `${cars.peugeot.name} dentro` : 'Libre'}</small></span>
+                   ${inside ? `<span class="garage-pin-car" style="--c:#2563eb;">${carSvg('peugeot')}</span>` : ''}
+                 </div>
+                 <div class="garage-pin-tail"></div>
+               </div>`,
+        iconSize: [200, 50],
+        iconAnchor: [100, 50]
+      });
+    }
+
+    const garageMarker = L.marker([GARAGE.lat, GARAGE.lng], {
+      icon: createGarageIcon(),
+      zIndexOffset: -500,
+      keyboard: false
+    }).addTo(map).on('click', () => {
+      if (isUpdatingLocation) return;
+      if (cars.peugeot.inGarage) selectCar('peugeot');
+      flyToGarage();
+    });
+
+    function renderGarage() {
+      garageMarker.setIcon(createGarageIcon());
+      document.getElementById('garage-fab-dot').classList.toggle('hidden', !cars.peugeot.inGarage);
+    }
+
+    function flyToGarage() {
+      map.flyTo([GARAGE.lat, GARAGE.lng], 18, { duration: 0.7 });
+      if (isUpdatingLocation) return;
+      showToast(cars.peugeot.inGarage
+        ? `🏠 ${cars.peugeot.name} en el garaje · ${GARAGE.label}`
+        : `🏠 Garaje libre · ${GARAGE.label}`);
+    }
+
+    let toastTimeout = null;
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.classList.remove('is-hidden');
+      clearTimeout(toastTimeout);
+      toastTimeout = setTimeout(() => toast.classList.add('is-hidden'), 2600);
+    }
+
     function createCarIcon(carKey) {
       const bg = carKey === 'peugeot' ? '#2563eb' : '#059669';
       return L.divIcon({
@@ -463,6 +638,8 @@
         topPill.textContent = "BT_CAR";
         topPill.className = "text-[10px] bg-blue-500/40 px-1.5 py-0.5 rounded-full";
       }
+
+      renderGarage();
     }
 
     renderCarMarkers();
@@ -619,14 +796,23 @@
       const now = new Date();
       const timeStr = `Hoy, ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
+      if (cars.peugeot.inGarage) {
+        flyToGarage();
+        return;
+      }
+
       cars.peugeot.inGarage = true;
-      cars.peugeot.street = "🏠 Guardado en el Garaje";
+      cars.peugeot.lat = GARAGE.lat;
+      cars.peugeot.lng = GARAGE.lng;
+      cars.peugeot.street = GARAGE_STREET;
       cars.peugeot.time = timeStr;
-      cars.peugeot.note = "Plaza de garaje cubierta (No está en la calle)";
+      cars.peugeot.note = GARAGE_NOTE;
 
       localStorage.setItem('family_parking_prosperidad_v2', JSON.stringify(cars));
       renderCarMarkers();
       cancelUpdateMode();
+      map.flyTo([GARAGE.lat, GARAGE.lng], 18, { duration: 0.7 });
+      showToast(`✅ ${cars.peugeot.name} guardado en el garaje`);
     }
 
     // 8. Cambiar entre Grande y Pequeño
@@ -675,19 +861,19 @@
       btnUpdate.innerHTML = `<span>📍 Actualizar ubicación (${c.name})</span>`;
 
       // Mostrar botón "En Garaje" solo para el coche Grande
+      // (si ya está dentro, el botón se queda marcado y solo lleva al garaje)
       const btnGarage = document.getElementById('btn-garage');
-      if (isP) {
-        btnGarage.classList.remove('hidden');
-      } else {
-        btnGarage.classList.add('hidden');
-      }
+      const inGarage = isP && c.inGarage;
+      btnGarage.className = `${isP ? '' : 'hidden '}py-3.5 px-4 rounded-2xl font-bold ${inGarage ? 'text-amber-950 bg-amber-400 hover:bg-amber-300' : 'text-amber-900 bg-amber-100 hover:bg-amber-200'} active:scale-[0.99] transition flex items-center justify-center gap-1.5 text-xs sm:text-sm whitespace-nowrap`;
+      btnGarage.innerHTML = inGarage ? '<span>✓ En garaje</span>' : '<span>🏠 En Garaje</span>';
+      btnGarage.title = inGarage ? `Está en el garaje (${GARAGE.label})` : `Guardar en el garaje (${GARAGE.label})`;
     }
 
     // 9. Centrar cámara en el coche seleccionado
     function centerOnCar() {
       const c = cars[activeCar];
       if (activeCar === 'peugeot' && c.inGarage) {
-        alert("El coche Grande está guardado en el garaje.");
+        flyToGarage();
         return;
       }
       map.flyTo([c.lat, c.lng], 18, { duration: 0.7 });
@@ -747,7 +933,7 @@
       const syncUrl = `${baseUrl}?${syncParams.toString()}`;
 
       const peugeotText = p.inGarage
-        ? `🚙 Grande: 🏠 Guardado en el Garaje (${p.time})`
+        ? `🚙 Grande: 🏠 En el garaje · ${GARAGE.label}, ${GARAGE.city} (${p.time})\n📍 Maps: https://maps.google.com/?q=${GARAGE.lat},${GARAGE.lng}`
         : `🚙 Grande: ${p.street} (${p.time})\n📍 Maps: https://maps.google.com/?q=${p.lat},${p.lng}`;
 
       const hyundaiText = `🚗 Pequeño: ${h.street} (${h.time})\n📍 Maps: https://maps.google.com/?q=${h.lat},${h.lng}`;
@@ -758,7 +944,7 @@
         navigator.share({ title: 'Ubicación Coches Familia', text, url: syncUrl });
       } else {
         navigator.clipboard.writeText(text);
-        alert("Ubicaciones y enlace de sincronización copiados al portapapeles.");
+        showToast("📋 Ubicaciones y enlace copiados");
       }
     }
 
@@ -773,12 +959,9 @@
     }
 
     // Inicializar en Modo Consulta limpio
+    // (si el Grande está en el garaje, sus coordenadas ya son las del garaje)
     selectCar('peugeot');
-    if (!cars.peugeot.inGarage) {
-      map.setView([cars.peugeot.lat, cars.peugeot.lng], 17);
-    } else {
-      map.setView([cars.hyundai.lat, cars.hyundai.lng], 17);
-    }
+    map.setView([cars.peugeot.lat, cars.peugeot.lng], 17);
   </script>
 </body>
 </html>
