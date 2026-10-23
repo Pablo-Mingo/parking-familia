@@ -288,9 +288,9 @@
   <script>
     // Coordenada (0,0) por defecto cuando no hay GPS disponible: Calle de la Constancia, 14 (Prosperidad)
     const DEFAULT_ORIGIN_CONSTANCIA_14 = {
-      lat: 40.44375,
-      lng: -3.67110,
-      label: "Calle Constancia, 14"
+      lat: 40.44152,
+      lng: -3.67342,
+      label: "C. de la Constancia, 14"
     };
 
     // 1. Estado inicial de los dos vehículos en Prosperidad
@@ -514,7 +514,7 @@
     async function fetchStreetName(lat, lng, callback) {
       // Si está exactamente en las coordenadas por defecto de Calle Constancia 14, devolverlo al instante
       if (Math.abs(lat - DEFAULT_ORIGIN_CONSTANCIA_14.lat) < 0.00012 && Math.abs(lng - DEFAULT_ORIGIN_CONSTANCIA_14.lng) < 0.00012) {
-        callback("Calle Constancia, 14");
+        callback(DEFAULT_ORIGIN_CONSTANCIA_14.label);
         return;
       }
       try {
