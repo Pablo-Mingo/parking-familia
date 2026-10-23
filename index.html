@@ -5,8 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Parking">
   <meta name="theme-color" content="#0f172a">
-  <title>Parking Familiar - 52 Prosperidad</title>
+  <title>Parking Familia</title>
+
+  <!-- App instalable (PWA) -->
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 
   <!-- Leaflet CSS Oficial -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -83,36 +90,76 @@
       background: rgba(0, 0, 0, 0.18);
     }
 
-    /* Marcadores personalizados de los coches */
-    .car-marker {
+    /* Respetar notch y barra inferior cuando se abre como app instalada */
+    #top-bar { top: calc(env(safe-area-inset-top) + 1rem); }
+    #bottom-panel { padding-bottom: calc(env(safe-area-inset-bottom) + 0.75rem); }
+
+    /* Iconos SVG de los coches */
+    .car-svg { width: 100%; height: 100%; display: block; }
+
+    /* Marcadores personalizados de los coches (chincheta con icono y nombre) */
+    .car-pin {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      filter: drop-shadow(0 6px 10px rgba(15, 23, 42, 0.35));
+    }
+
+    .car-pin-body {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      background: #ffffff;
+      color: #0f172a;
+      padding: 4px 12px 4px 4px;
+      border-radius: 9999px;
+      font-weight: 700;
+      font-size: 13px;
+      letter-spacing: -0.01em;
+      white-space: nowrap;
+    }
+
+    .car-pin-ico {
+      width: 34px;
+      height: 34px;
+      border-radius: 9999px;
+      background: var(--c);
+      color: #ffffff;
       display: flex;
       align-items: center;
       justify-content: center;
-      border-radius: 9999px;
-      color: white;
-      font-weight: 700;
-      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
-      border: 2.5px solid white;
-      padding: 5px 11px;
-      font-size: 12px;
-      white-space: nowrap;
-      gap: 4px;
+      padding: 0 4px;
+      box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.15);
+    }
+
+    .car-pin-tail {
+      width: 0;
+      height: 0;
+      border-left: 7px solid transparent;
+      border-right: 7px solid transparent;
+      border-top: 8px solid #ffffff;
+      margin-top: -1px;
     }
   </style>
 </head>
 <body class="relative">
 
   <!-- CAPA 1: Selector Superior de Vehículo -->
-  <div class="absolute top-4 left-4 right-4 z-[600] flex flex-col gap-2">
+  <div id="top-bar" class="absolute left-4 right-4 z-[600] flex flex-col gap-2">
     <div class="bg-white/95 backdrop-blur-md p-1.5 rounded-2xl shadow-lg border border-slate-200/80 flex gap-1">
-      <button id="tab-peugeot" onclick="selectCar('peugeot')" 
+      <button id="tab-peugeot" onclick="selectCar('peugeot')"
         class="flex-1 py-2.5 px-3 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-1.5 bg-blue-600 text-white shadow-sm">
-        <span>🚙 Peugeot 508 SW</span>
+        <span class="w-7 h-3.5 shrink-0" data-car-icon="peugeot"></span>
+        <span>Grande</span>
         <span id="peugeot-top-pill" class="text-[10px] bg-blue-500/40 px-1.5 py-0.5 rounded-full">BT_CAR</span>
       </button>
-      <button id="tab-hyundai" onclick="selectCar('hyundai')" 
+      <button id="tab-hyundai" onclick="selectCar('hyundai')"
         class="flex-1 py-2.5 px-3 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-1.5 text-slate-600 hover:bg-slate-100">
-        <span>🚗 Hyundai i20</span>
+        <span class="w-7 h-3.5 shrink-0" data-car-icon="hyundai"></span>
+        <span>Pequeño</span>
       </button>
     </div>
 
@@ -132,20 +179,20 @@
   <div id="center-shadow" class="hidden"></div>
   <div id="center-pin" class="hidden">
     <div id="pin-bubble" class="bg-blue-600 text-white px-3.5 py-1.5 rounded-full shadow-2xl font-bold text-xs border-2 border-white flex items-center gap-1.5">
-      <span id="pin-label">Fijar Peugeot aquí</span>
+      <span id="pin-label">Fijar Grande aquí</span>
     </div>
     <div id="pin-stem" class="w-1 h-3.5 bg-blue-600 mx-auto"></div>
   </div>
 
   <!-- CAPA 3: Botones flotantes laterales (Centrar en coche, Bluetooth rápido y Mi GPS) -->
   <div class="absolute right-4 bottom-64 z-[600] flex flex-col gap-3">
-    <!-- Botón de Aparcado Automático Bluetooth (Peugeot 508 SW - BT_CAR_SISTEM) -->
+    <!-- Botón de Aparcado Automático Bluetooth (coche Grande - BT_CAR_SISTEM) -->
     <button onclick="bluetoothAutoPark()" title="Aparcado rápido por Bluetooth (BT_CAR_SISTEM)"
       class="w-12 h-12 rounded-2xl bg-indigo-600 text-white shadow-xl flex flex-col items-center justify-center border-2 border-white active:scale-95 transition">
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7l10 10-5 5V2l5 5L7 17"/>
       </svg>
-      <span class="text-[8px] font-bold leading-none mt-0.5">BT 508</span>
+      <span class="text-[8px] font-bold leading-none mt-0.5">BT</span>
     </button>
 
     <!-- Botón Mi Ubicación GPS -->
@@ -158,7 +205,7 @@
   </div>
 
   <!-- CAPA 4: Panel Inferior (Alterna entre MODO CONSULTA y MODO ACTUALIZAR UBICACIÓN) -->
-  <div class="absolute bottom-0 left-0 right-0 z-[600] p-3">
+  <div id="bottom-panel" class="absolute bottom-0 left-0 right-0 z-[600] p-3">
     <div class="bg-white rounded-3xl shadow-2xl border border-slate-100 p-4 flex flex-col gap-3">
       
       <!-- Cabecera de información del coche seleccionado -->
@@ -166,7 +213,7 @@
         <div class="min-w-0">
           <div class="flex items-center gap-2 flex-wrap">
             <span id="card-badge" class="px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-blue-100 text-blue-800">
-              PEUGEOT 508 SW
+              GRANDE
             </span>
             <span id="zone-badge" class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800">
               Zona 52 - PROSPERIDAD
@@ -204,7 +251,7 @@
             <span>📍 Actualizar ubicación</span>
           </button>
 
-          <!-- Botón exclusivo para meter el Peugeot 508 SW en el Garaje -->
+          <!-- Botón exclusivo para meter el coche Grande en el Garaje -->
           <button id="btn-garage" onclick="parkPeugeotInGarage()" 
             class="py-3.5 px-4 rounded-2xl font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 active:scale-[0.99] transition flex items-center justify-center gap-1.5 text-xs sm:text-sm whitespace-nowrap">
             <span>🏠 En Garaje</span>
@@ -249,7 +296,7 @@
     // 1. Estado inicial de los dos vehículos en Prosperidad
     const defaultData = {
       peugeot: {
-        name: "Peugeot 508 SW",
+        name: "Grande",
         lat: 40.4440,
         lng: -3.6700,
         street: "Calle de Clara del Rey, 14",
@@ -259,7 +306,7 @@
         color: "#2563eb"
       },
       hyundai: {
-        name: "Hyundai i20",
+        name: "Pequeño",
         lat: 40.4431,
         lng: -3.6722,
         street: "Calle de Cartagena, 118",
@@ -271,6 +318,32 @@
     };
 
     let cars = JSON.parse(localStorage.getItem('family_parking_prosperidad_v2')) || defaultData;
+    // Nombres visibles (se fuerzan para que los datos guardados con los nombres antiguos se actualicen)
+    cars.peugeot.name = "Grande";
+    cars.hyundai.name = "Pequeño";
+
+    // Iconos SVG de los coches: Grande = familiar (ranchera), Pequeño = utilitario compacto.
+    // Las ventanillas son huecos (evenodd), así se adaptan a cualquier fondo.
+    const CAR_PATHS = {
+      peugeot: {
+        body: "M1.5 12.2V8.8Q1.5 7.5 2.8 7.2L8.6 5.9 12.3 3Q13 2.4 13.9 2.4H26.6Q27.6 2.4 28.1 3.3L30 7.3Q30.5 7.8 30.5 8.7V12.2H27.6A3.1 3.1 0 0 0 21.4 12.2H11.1A3.1 3.1 0 0 0 4.9 12.2ZM9.8 6 13.2 3.5H17.6V6ZM18.8 3.5H26.3L27.7 6H18.8Z",
+        wheels: [8, 24.5]
+      },
+      hyundai: {
+        body: "M5 12.2V9.2Q5 8 6.2 7.7L10.4 6.4 13.4 3.4Q14 2.8 14.9 2.8H21.2Q22.1 2.8 22.6 3.5L25.4 7.4Q27 7.9 27 9.3V12.2H24.6A3 3 0 0 0 18.6 12.2H13.4A3 3 0 0 0 7.4 12.2ZM11.6 6.4 14.2 3.9H17.4V6.4ZM18.6 3.9H21.1L23.2 6.4H18.6Z",
+        wheels: [10.4, 21.6]
+      }
+    };
+
+    function carSvg(carKey) {
+      const p = CAR_PATHS[carKey];
+      const wheels = p.wheels.map(cx => `<circle cx="${cx}" cy="12.2" r="2.25"/>`).join('');
+      return `<svg class="car-svg" viewBox="0 0 32 15" fill="currentColor" fill-rule="evenodd" aria-hidden="true"><path d="${p.body}"/>${wheels}</svg>`;
+    }
+
+    document.querySelectorAll('[data-car-icon]').forEach(el => {
+      el.innerHTML = carSvg(el.dataset.carIcon);
+    });
     let activeCar = 'peugeot';
     let isUpdatingLocation = false;
     let userMarker = null;
@@ -350,14 +423,15 @@
     const markers = {};
 
     function createCarIcon(carKey) {
-      const isPeugeot = carKey === 'peugeot';
-      const bg = isPeugeot ? '#2563eb' : '#059669';
-      const label = isPeugeot ? '🚙 508 SW' : '🚗 i20';
+      const bg = carKey === 'peugeot' ? '#2563eb' : '#059669';
       return L.divIcon({
         className: '',
-        html: `<div class="car-marker" style="background:${bg};">${label}</div>`,
-        iconSize: [96, 32],
-        iconAnchor: [48, 16]
+        html: `<div class="car-pin" style="--c:${bg};">
+                 <div class="car-pin-body"><span class="car-pin-ico">${carSvg(carKey)}</span><span>${cars[carKey].name}</span></div>
+                 <div class="car-pin-tail"></div>
+               </div>`,
+        iconSize: [140, 50],
+        iconAnchor: [70, 50]
       });
     }
 
@@ -540,7 +614,7 @@
       });
     }
 
-    // 7. Guardar el Peugeot 508 SW directamente en el Garaje
+    // 7. Guardar el coche Grande directamente en el Garaje
     function parkPeugeotInGarage() {
       const now = new Date();
       const timeStr = `Hoy, ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -555,7 +629,7 @@
       cancelUpdateMode();
     }
 
-    // 8. Cambiar entre Peugeot 508 SW y Hyundai i20
+    // 8. Cambiar entre Grande y Pequeño
     function selectCar(carKey) {
       activeCar = carKey;
       const isP = carKey === 'peugeot';
@@ -573,7 +647,7 @@
       // Estilo del puntero central (para cuando se active)
       document.getElementById('pin-bubble').className = `${isP ? 'bg-blue-600' : 'bg-emerald-600'} text-white px-3.5 py-1.5 rounded-full shadow-2xl font-bold text-xs border-2 border-white flex items-center gap-1.5`;
       document.getElementById('pin-stem').className = `w-1 h-3.5 ${isP ? 'bg-blue-600' : 'bg-emerald-600'} mx-auto`;
-      document.getElementById('pin-label').textContent = isP ? 'Fijar Peugeot aquí' : 'Fijar Hyundai aquí';
+      document.getElementById('pin-label').textContent = isP ? 'Fijar Grande aquí' : 'Fijar Pequeño aquí';
 
       // Datos de la tarjeta inferior
       const badge = document.getElementById('card-badge');
@@ -598,9 +672,9 @@
       // Botones del modo consulta
       const btnUpdate = document.getElementById('btn-start-update');
       btnUpdate.className = `flex-1 py-3.5 px-4 rounded-2xl font-bold text-white ${isP ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/25' : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/25'} active:scale-[0.99] transition shadow-lg flex items-center justify-center gap-2 text-sm`;
-      btnUpdate.innerHTML = `<span>📍 Actualizar ubicación (${isP ? 'Peugeot' : 'Hyundai'})</span>`;
+      btnUpdate.innerHTML = `<span>📍 Actualizar ubicación (${c.name})</span>`;
 
-      // Mostrar botón "En Garaje" solo para el Peugeot 508 SW
+      // Mostrar botón "En Garaje" solo para el coche Grande
       const btnGarage = document.getElementById('btn-garage');
       if (isP) {
         btnGarage.classList.remove('hidden');
@@ -613,7 +687,7 @@
     function centerOnCar() {
       const c = cars[activeCar];
       if (activeCar === 'peugeot' && c.inGarage) {
-        alert("El Peugeot 508 SW está guardado en el garaje.");
+        alert("El coche Grande está guardado en el garaje.");
         return;
       }
       map.flyTo([c.lat, c.lng], 18, { duration: 0.7 });
@@ -646,7 +720,7 @@
       );
     }
 
-    // 11. Guardado rápido por Bluetooth (BT_CAR_SISTEM) para el Peugeot 508 SW
+    // 11. Guardado rápido por Bluetooth (BT_CAR_SISTEM) para el coche Grande
     function bluetoothAutoPark() {
       selectCar('peugeot');
       startUpdateMode();
@@ -673,10 +747,10 @@
       const syncUrl = `${baseUrl}?${syncParams.toString()}`;
 
       const peugeotText = p.inGarage
-        ? `🚙 Peugeot 508 SW: 🏠 Guardado en el Garaje (${p.time})`
-        : `🚙 Peugeot 508 SW: ${p.street} (${p.time})\n📍 Maps: https://maps.google.com/?q=${p.lat},${p.lng}`;
+        ? `🚙 Grande: 🏠 Guardado en el Garaje (${p.time})`
+        : `🚙 Grande: ${p.street} (${p.time})\n📍 Maps: https://maps.google.com/?q=${p.lat},${p.lng}`;
 
-      const hyundaiText = `🚗 Hyundai i20: ${h.street} (${h.time})\n📍 Maps: https://maps.google.com/?q=${h.lat},${h.lng}`;
+      const hyundaiText = `🚗 Pequeño: ${h.street} (${h.time})\n📍 Maps: https://maps.google.com/?q=${h.lat},${h.lng}`;
 
       const text = `🚗 Parking Familiar (52 - Prosperidad):\n\n${peugeotText}\n\n${hyundaiText}\n\n🔄 Abrir y actualizar en la App:\n${syncUrl}`;
 
@@ -692,6 +766,11 @@
     window.addEventListener('load', () => {
       setTimeout(() => map.invalidateSize(), 150);
     });
+
+    // Registrar el service worker (necesario para poder instalar la app en el móvil)
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
 
     // Inicializar en Modo Consulta limpio
     selectCar('peugeot');
