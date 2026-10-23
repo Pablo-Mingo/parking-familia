@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0f172a">
+  <title>Parking Familiar - 52 Prosperidad</title>
+
+  <!-- Leaflet CSS Oficial -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100dvh;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+      background-color: #0f172a;
+    }
+
+    #map {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100dvh;
+      z-index: 1;
+    }
+
+    /* Evitar que Tailwind rompa las imágenes del mapa de Leaflet */
+    .leaflet-pane img,
+    .leaflet-tile,
+    .leaflet-marker-icon,
+    .leaflet-marker-shadow {
+      max-width: none !important;
+      max-height: none !important;
+    }
+
+    .leaflet-control-zoom,
+    .leaflet-control-attribution {
+      display: none !important;
+    }
+
+    /* Pin central fijo ("Mirilla" estilo ElParking) - OCULTO POR DEFECTO */
+    #center-pin {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -100%);
+      z-index: 500;
+      pointer-events: none;
+      transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+
+    #center-pin.moving {
+      transform: translate(-50%, -125%) scale(1.08);
+    }
+
+    #center-shadow {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 12px;
+      height: 12px;
+      background: rgba(0, 0, 0, 0.35);
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 499;
+      pointer-events: none;
+      transition: all 0.2s ease;
+    }
+
+    #center-shadow.moving {
+      width: 20px;
+      height: 20px;
+      background: rgba(0, 0, 0, 0.18);
+    }
+
+    /* Marcadores personalizados de los coches */
+    .car-marker {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 9999px;
+      color: white;
+      font-weight: 700;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+      border: 2.5px solid white;
+      padding: 5px 11px;
+      font-size: 12px;
+      white-space: nowrap;
+      gap: 4px;
+    }
+  </style>
+</head>
+<body class="relative">
+
+  <!-- CAPA 1: Selector Superior de Vehículo -->
+  <div class="absolute top-4 left-4 right-4 z-[600] flex flex-col gap-2">
+    <div class="bg-white/95 backdrop-blur-md p-1.5 rounded-2xl shadow-lg border border-slate-200/80 flex gap-1">
+      <button id="tab-peugeot" onclick="selectCar('peugeot')" 
+        class="flex-1 py-2.5 px-3 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-1.5 bg-blue-600 text-white shadow-sm">
+        <span>🚙 Peugeot 508 SW</span>
+        <span id="peugeot-top-pill" class="text-[10px] bg-blue-500/40 px-1.5 py-0.5 rounded-full">BT_CAR</span>
+      </button>
+      <button id="tab-hyundai" onclick="selectCar('hyundai')" 
+        class="flex-1 py-2.5 px-3 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-1.5 text-slate-600 hover:bg-slate-100">
+        <span>🚗 Hyundai i20</span>
+      </button>
+    </div>
+
+    <!-- Píldora superior de dirección en vivo (Solo se muestra cuando estás en modo Actualizar Ubicación) -->
+    <div id="edit-live-banner" class="hidden bg-slate-900/95 backdrop-blur-md text-white px-4 py-2.5 rounded-xl shadow-lg flex items-center justify-between text-xs border border-white/15">
+      <div class="flex items-center gap-2 truncate">
+        <span id="zone-dot" class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
+        <span id="live-street" class="font-medium truncate">Mueve el mapa para situar el puntero...</span>
+      </div>
+      <button onclick="resetToConstancia14()" class="text-amber-300 hover:text-amber-200 font-semibold ml-2 whitespace-nowrap text-[11px]">
+        Ir a Constancia 14
+      </button>
+    </div>
+  </div>
+
+  <!-- CAPA 2: Puntero Central Fijo ("Mirilla" estilo ElParking) - OCULTO EN MODO NORMAL -->
+  <div id="center-shadow" class="hidden"></div>
+  <div id="center-pin" class="hidden">
+    <div id="pin-bubble" class="bg-blue-600 text-white px-3.5 py-1.5 rounded-full shadow-2xl font-bold text-xs border-2 border-white flex items-center gap-1.5">
+      <span id="pin-label">Fijar Peugeot aquí</span>
+    </div>
+    <div id="pin-stem" class="w-1 h-3.5 bg-blue-600 mx-auto"></div>
+  </div>
+
+  <!-- CAPA 3: Botones flotantes laterales (Centrar en coche, Bluetooth rápido y Mi GPS) -->
+  <div class="absolute right-4 bottom-64 z-[600] flex flex-col gap-3">
+    <!-- Botón de Aparcado Automático Bluetooth (Peugeot 508 SW - BT_CAR_SISTEM) -->
+    <button onclick="bluetoothAutoPark()" title="Aparcado rápido por Bluetooth (BT_CAR_SISTEM)"
+      class="w-12 h-12 rounded-2xl bg-indigo-600 text-white shadow-xl flex flex-col items-center justify-center border-2 border-white active:scale-95 transition">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7l10 10-5 5V2l5 5L7 17"/>
+      </svg>
+      <span class="text-[8px] font-bold leading-none mt-0.5">BT 508</span>
+    </button>
+
+    <!-- Botón Mi Ubicación GPS -->
+    <button onclick="locateUserGPS()" title="Ver mi ubicación actual"
+      class="w-12 h-12 rounded-2xl bg-white text-slate-800 shadow-xl flex items-center justify-center border border-slate-200 active:scale-95 transition">
+      <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0013 3.06V1h-2v2.06A8.994 8.994 0 003.06 11H1v2h2.06A8.994 8.994 0 0011 20.94V23h2v-2.06A8.994 8.994 0 0020.94 13H23v-2h-2.06z"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- CAPA 4: Panel Inferior (Alterna entre MODO CONSULTA y MODO ACTUALIZAR UBICACIÓN) -->
+  <div class="absolute bottom-0 left-0 right-0 z-[600] p-3">
+    <div class="bg-white rounded-3xl shadow-2xl border border-slate-100 p-4 flex flex-col gap-3">
+      
+      <!-- Cabecera de información del coche seleccionado -->
+      <div class="flex items-start justify-between gap-2">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span id="card-badge" class="px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-blue-100 text-blue-800">
+              PEUGEOT 508 SW
+            </span>
+            <span id="zone-badge" class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800">
+              Zona 52 - PROSPERIDAD
+            </span>
+            <span id="card-time" class="text-xs text-slate-400">Hoy, 10:15</span>
+          </div>
+          <h2 id="card-street" class="text-base font-bold text-slate-800 mt-1 truncate">
+            Calle de Clara del Rey, 14
+          </h2>
+          <p id="card-note" class="text-xs text-slate-500 truncate">
+            Zona SER Verde · Frente a la farmacia
+          </p>
+        </div>
+
+        <!-- Botones de centrar en el coche y compartir por WhatsApp -->
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button onclick="centerOnCar()" class="p-2.5 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 active:scale-95 transition" title="Centrar mapa en este coche">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+            </svg>
+          </button>
+          <button onclick="shareLocations()" class="p-2.5 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 active:scale-95 transition" title="Compartir ubicación con la familia">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- CONTROLES EN MODO CONSULTA (Por defecto: sin puntero en el mapa) -->
+      <div id="view-mode-controls" class="flex flex-col gap-2">
+        <div class="flex gap-2">
+          <button id="btn-start-update" onclick="startUpdateMode()" 
+            class="flex-1 py-3.5 px-4 rounded-2xl font-bold text-white bg-blue-600 hover:bg-blue-700 active:scale-[0.99] transition shadow-lg shadow-blue-600/25 flex items-center justify-center gap-2 text-sm">
+            <span>📍 Actualizar ubicación</span>
+          </button>
+
+          <!-- Botón exclusivo para meter el Peugeot 508 SW en el Garaje -->
+          <button id="btn-garage" onclick="parkPeugeotInGarage()" 
+            class="py-3.5 px-4 rounded-2xl font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 active:scale-[0.99] transition flex items-center justify-center gap-1.5 text-xs sm:text-sm whitespace-nowrap">
+            <span>🏠 En Garaje</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- CONTROLES EN MODO ACTUALIZAR UBICACIÓN (Con puntero activo en el mapa) -->
+      <div id="edit-mode-controls" class="hidden flex-col gap-2.5">
+        <input id="note-input" type="text" placeholder="Añadir nota (ej. Zona verde, frente al portal 14...)" 
+          class="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:border-blue-500">
+
+        <div class="flex gap-2">
+          <button onclick="cancelUpdateMode()" 
+            class="py-3 px-4 rounded-2xl font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 active:scale-[0.99] transition text-xs sm:text-sm">
+            Cancelar
+          </button>
+          <button id="btn-confirm-park" onclick="confirmParkAtCenter()" 
+            class="flex-1 py-3 px-4 rounded-2xl font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] transition shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2 text-sm">
+            <span>✅ Confirmar posición aquí</span>
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Contenedor del Mapa Real (OpenStreetMap) -->
+  <div id="map"></div>
+
+  <!-- Leaflet JS Oficial -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    // Coordenada (0,0) por defecto cuando no hay GPS disponible: Calle de la Constancia, 14 (Prosperidad)
+    const DEFAULT_ORIGIN_CONSTANCIA_14 = {
+      lat: 40.44375,
+      lng: -3.67110,
+      label: "Calle Constancia, 14"
+    };
+
+    // 1. Estado inicial de los dos vehículos en Prosperidad
+    const defaultData = {
+      peugeot: {
+        name: "Peugeot 508 SW",
+        lat: 40.4440,
+        lng: -3.6700,
+        street: "Calle de Clara del Rey, 14",
+        time: "Hoy, 10:15",
+        note: "BT_CAR_SISTEM · Zona SER Verde",
+        inGarage: false,
+        color: "#2563eb"
+      },
+      hyundai: {
+        name: "Hyundai i20",
+        lat: 40.4431,
+        lng: -3.6722,
+        street: "Calle de Cartagena, 118",
+        time: "Ayer, 20:40",
+        note: "Aparcado en línea junto a Quirón",
+        inGarage: false,
+        color: "#059669"
+      }
+    };
+
+    let cars = JSON.parse(localStorage.getItem('family_parking_prosperidad_v2')) || defaultData;
+    let activeCar = 'peugeot';
+    let isUpdatingLocation = false;
+    let userMarker = null;
+
+    // 1b. Sincronización por parámetros URL (?peugeot=lat,lng&p_garage=1&hyundai=lat,lng)
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has('p_garage') && urlParams.get('p_garage') === '1') {
+      cars.peugeot.inGarage = true;
+      cars.peugeot.street = "🏠 Guardado en el Garaje";
+      if (urlParams.has('p_time')) cars.peugeot.time = urlParams.get('p_time');
+      if (urlParams.has('p_note')) cars.peugeot.note = urlParams.get('p_note');
+    } else if (urlParams.has('peugeot')) {
+      const [pLat, pLng] = urlParams.get('peugeot').split(',').map(Number);
+      if (!isNaN(pLat) && !isNaN(pLng)) {
+        cars.peugeot.inGarage = false;
+        cars.peugeot.lat = pLat;
+        cars.peugeot.lng = pLng;
+        if (urlParams.has('p_street')) cars.peugeot.street = urlParams.get('p_street');
+        if (urlParams.has('p_time')) cars.peugeot.time = urlParams.get('p_time');
+        if (urlParams.has('p_note')) cars.peugeot.note = urlParams.get('p_note');
+      }
+    }
+
+    if (urlParams.has('hyundai')) {
+      const [hLat, hLng] = urlParams.get('hyundai').split(',').map(Number);
+      if (!isNaN(hLat) && !isNaN(hLng)) {
+        cars.hyundai.lat = hLat;
+        cars.hyundai.lng = hLng;
+        if (urlParams.has('h_street')) cars.hyundai.street = urlParams.get('h_street');
+        if (urlParams.has('h_time')) cars.hyundai.time = urlParams.get('h_time');
+        if (urlParams.has('h_note')) cars.hyundai.note = urlParams.get('h_note');
+      }
+    }
+    localStorage.setItem('family_parking_prosperidad_v2', JSON.stringify(cars));
+
+    // 2. Inicializar Mapa Real con OpenStreetMap Oficial (Sin bloqueos de API Key)
+    const map = L.map('map', {
+      zoomControl: false,
+      attributionControl: false
+    }).setView([DEFAULT_ORIGIN_CONSTANCIA_14.lat, DEFAULT_ORIGIN_CONSTANCIA_14.lng], 17);
+
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19
+    }).addTo(map);
+
+    // 2b. Polígono de la Zona 52 - Prosperidad
+    const prosperidadPolygonCoords = [
+      [40.4494, -3.6766],
+      [40.4518, -3.6685],
+      [40.4485, -3.6608],
+      [40.4426, -3.6605],
+      [40.4379, -3.6765],
+      [40.4435, -3.6772]
+    ];
+
+    L.polygon(prosperidadPolygonCoords, {
+      color: '#0d9488',
+      weight: 2.5,
+      dashArray: '6, 6',
+      fillColor: '#14b8a6',
+      fillOpacity: 0.06,
+      interactive: false
+    }).addTo(map);
+
+    function isInsideProsperidad(lat, lng) {
+      let inside = false;
+      for (let i = 0, j = prosperidadPolygonCoords.length - 1; i < prosperidadPolygonCoords.length; j = i++) {
+        const xi = prosperidadPolygonCoords[i][0], yi = prosperidadPolygonCoords[i][1];
+        const xj = prosperidadPolygonCoords[j][0], yj = prosperidadPolygonCoords[j][1];
+        const intersect = ((yi > lng) !== (yj > lng)) && (lat < (xj - xi) * (lng - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
+
+    // 3. Marcadores de los dos coches en el mapa (Si el Peugeot está en garaje, no se dibuja en la calle)
+    const markers = {};
+
+    function createCarIcon(carKey) {
+      const isPeugeot = carKey === 'peugeot';
+      const bg = isPeugeot ? '#2563eb' : '#059669';
+      const label = isPeugeot ? '🚙 508 SW' : '🚗 i20';
+      return L.divIcon({
+        className: '',
+        html: `<div class="car-marker" style="background:${bg};">${label}</div>`,
+        iconSize: [96, 32],
+        iconAnchor: [48, 16]
+      });
+    }
+
+    function renderCarMarkers() {
+      ['peugeot', 'hyundai'].forEach(key => {
+        if (markers[key]) {
+          map.removeLayer(markers[key]);
+          markers[key] = null;
+        }
+        // Si es el Peugeot y está en el garaje, no ponemos marcador en la calle
+        if (key === 'peugeot' && cars.peugeot.inGarage) return;
+
+        markers[key] = L.marker([cars[key].lat, cars[key].lng], {
+          icon: createCarIcon(key)
+        }).addTo(map).on('click', () => {
+          if (!isUpdatingLocation) {
+            selectCar(key);
+            centerOnCar();
+          }
+        });
+      });
+
+      // Actualizar etiqueta superior del Peugeot si está en garaje
+      const topPill = document.getElementById('peugeot-top-pill');
+      if (cars.peugeot.inGarage) {
+        topPill.textContent = "🏠 GARAJE";
+        topPill.className = "text-[10px] bg-amber-400 text-amber-950 font-extrabold px-1.5 py-0.5 rounded-full";
+      } else {
+        topPill.textContent = "BT_CAR";
+        topPill.className = "text-[10px] bg-blue-500/40 px-1.5 py-0.5 rounded-full";
+      }
+    }
+
+    renderCarMarkers();
+
+    // 4. Eventos del mapa (Solo procesan la mirilla cuando estamos en Modo Actualizar Ubicación)
+    const centerPin = document.getElementById('center-pin');
+    const centerShadow = document.getElementById('center-shadow');
+    const liveStreet = document.getElementById('live-street');
+    const zoneBadge = document.getElementById('zone-badge');
+    const zoneDot = document.getElementById('zone-dot');
+    let geocodeTimeout = null;
+
+    map.on('movestart', () => {
+      if (!isUpdatingLocation) return;
+      centerPin.classList.add('moving');
+      centerShadow.classList.add('moving');
+      liveStreet.textContent = "Moviendo puntero...";
+    });
+
+    map.on('moveend', () => {
+      if (!isUpdatingLocation) return;
+      centerPin.classList.remove('moving');
+      centerShadow.classList.remove('moving');
+      updateCenterPinAddress();
+    });
+
+    function updateCenterPinAddress() {
+      const center = map.getCenter();
+      const inZone = isInsideProsperidad(center.lat, center.lng);
+
+      if (inZone) {
+        zoneBadge.textContent = "Estás en 52 - PROSPERIDAD";
+        zoneBadge.className = "px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800";
+        zoneDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0";
+      } else {
+        zoneBadge.textContent = "Fuera de Zona 52";
+        zoneBadge.className = "px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 text-amber-800";
+        zoneDot.className = "w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0";
+      }
+
+      clearTimeout(geocodeTimeout);
+      geocodeTimeout = setTimeout(() => {
+        fetchStreetName(center.lat, center.lng, (address) => {
+          liveStreet.textContent = address;
+        });
+      }, 300);
+    }
+
+    async function fetchStreetName(lat, lng, callback) {
+      // Si está exactamente en las coordenadas por defecto de Calle Constancia 14, devolverlo al instante
+      if (Math.abs(lat - DEFAULT_ORIGIN_CONSTANCIA_14.lat) < 0.00012 && Math.abs(lng - DEFAULT_ORIGIN_CONSTANCIA_14.lng) < 0.00012) {
+        callback("Calle Constancia, 14");
+        return;
+      }
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`, {
+          headers: { 'Accept-Language': 'es' }
+        });
+        const data = await res.json();
+        if (data && data.address) {
+          const road = data.address.road || data.address.pedestrian || data.address.living_street || data.address.suburb || "Calle en Prosperidad";
+          const number = data.address.house_number ? `, ${data.address.house_number}` : "";
+          callback(`${road}${number}`);
+        } else {
+          callback(`${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+        }
+      } catch (e) {
+        callback(`Prosperidad (${lat.toFixed(4)}, ${lng.toFixed(4)})`);
+      }
+    }
+
+    // 5. Activar el Modo Actualizar Ubicación (Muestra el puntero en GPS del móvil o en Calle Constancia 14)
+    function startUpdateMode() {
+      isUpdatingLocation = true;
+
+      // Mostrar puntero central y controles de confirmación
+      centerPin.classList.remove('hidden');
+      centerShadow.classList.remove('hidden');
+      document.getElementById('edit-live-banner').classList.remove('hidden');
+      document.getElementById('view-mode-controls').classList.add('hidden');
+      document.getElementById('edit-mode-controls').classList.remove('hidden');
+      document.getElementById('edit-mode-controls').classList.add('flex');
+
+      liveStreet.textContent = "Buscando ubicación del dispositivo...";
+
+      // Intentar obtener el GPS del móvil; si falla o no hay permiso, ir a (0,0) = Calle Constancia 14
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const { latitude, longitude } = pos.coords;
+            if (userMarker) map.removeLayer(userMarker);
+            userMarker = L.circleMarker([latitude, longitude], {
+              radius: 7,
+              fillColor: '#3b82f6',
+              color: '#ffffff',
+              weight: 3,
+              fillOpacity: 1
+            }).addTo(map);
+            map.setView([latitude, longitude], 18);
+            updateCenterPinAddress();
+          },
+          () => {
+            // Fallback automático a Calle Constancia, 14
+            resetToConstancia14();
+          },
+          { enableHighAccuracy: true, timeout: 3500, maximumAge: 10000 }
+        );
+      } else {
+        resetToConstancia14();
+      }
+    }
+
+    // Colocar el puntero en la coordenada (0,0) por defecto: Calle Constancia, 14
+    function resetToConstancia14() {
+      map.setView([DEFAULT_ORIGIN_CONSTANCIA_14.lat, DEFAULT_ORIGIN_CONSTANCIA_14.lng], 18);
+      liveStreet.textContent = DEFAULT_ORIGIN_CONSTANCIA_14.label;
+    }
+
+    // Cancelar modo de actualización y ocultar el puntero
+    function cancelUpdateMode() {
+      isUpdatingLocation = false;
+      centerPin.classList.add('hidden');
+      centerShadow.classList.add('hidden');
+      document.getElementById('edit-live-banner').classList.add('hidden');
+      document.getElementById('edit-mode-controls').classList.add('hidden');
+      document.getElementById('edit-mode-controls').classList.remove('flex');
+      document.getElementById('view-mode-controls').classList.remove('hidden');
+      selectCar(activeCar);
+    }
+
+    // 6. Confirmar aparcamiento en la posición donde apunta el marcador central
+    function confirmParkAtCenter() {
+      const center = map.getCenter();
+      const noteVal = document.getElementById('note-input').value.trim();
+      const now = new Date();
+      const timeStr = `Hoy, ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+      fetchStreetName(center.lat, center.lng, (streetName) => {
+        cars[activeCar].inGarage = false;
+        cars[activeCar].lat = center.lat;
+        cars[activeCar].lng = center.lng;
+        cars[activeCar].street = streetName;
+        cars[activeCar].time = timeStr;
+        cars[activeCar].note = noteVal || "Aparcado en la calle";
+
+        localStorage.setItem('family_parking_prosperidad_v2', JSON.stringify(cars));
+        renderCarMarkers();
+        cancelUpdateMode();
+      });
+    }
+
+    // 7. Guardar el Peugeot 508 SW directamente en el Garaje
+    function parkPeugeotInGarage() {
+      const now = new Date();
+      const timeStr = `Hoy, ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+      cars.peugeot.inGarage = true;
+      cars.peugeot.street = "🏠 Guardado en el Garaje";
+      cars.peugeot.time = timeStr;
+      cars.peugeot.note = "Plaza de garaje cubierta (No está en la calle)";
+
+      localStorage.setItem('family_parking_prosperidad_v2', JSON.stringify(cars));
+      renderCarMarkers();
+      cancelUpdateMode();
+    }
+
+    // 8. Cambiar entre Peugeot 508 SW y Hyundai i20
+    function selectCar(carKey) {
+      activeCar = carKey;
+      const isP = carKey === 'peugeot';
+      const c = cars[carKey];
+
+      // Pestañas superiores
+      document.getElementById('tab-peugeot').className = isP
+        ? "flex-1 py-2.5 px-3 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-1.5 bg-blue-600 text-white shadow-sm"
+        : "flex-1 py-2.5 px-3 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-1.5 text-slate-600 hover:bg-slate-100";
+
+      document.getElementById('tab-hyundai').className = !isP
+        ? "flex-1 py-2.5 px-3 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-1.5 bg-emerald-600 text-white shadow-sm"
+        : "flex-1 py-2.5 px-3 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-1.5 text-slate-600 hover:bg-slate-100";
+
+      // Estilo del puntero central (para cuando se active)
+      document.getElementById('pin-bubble').className = `${isP ? 'bg-blue-600' : 'bg-emerald-600'} text-white px-3.5 py-1.5 rounded-full shadow-2xl font-bold text-xs border-2 border-white flex items-center gap-1.5`;
+      document.getElementById('pin-stem').className = `w-1 h-3.5 ${isP ? 'bg-blue-600' : 'bg-emerald-600'} mx-auto`;
+      document.getElementById('pin-label').textContent = isP ? 'Fijar Peugeot aquí' : 'Fijar Hyundai aquí';
+
+      // Datos de la tarjeta inferior
+      const badge = document.getElementById('card-badge');
+      badge.textContent = c.name.toUpperCase();
+      badge.className = isP
+        ? "px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-blue-100 text-blue-800"
+        : "px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-emerald-100 text-emerald-800";
+
+      if (isP && c.inGarage) {
+        zoneBadge.textContent = "🏠 EN GARAJE";
+        zoneBadge.className = "px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 text-amber-800";
+      } else {
+        zoneBadge.textContent = "Zona 52 - PROSPERIDAD";
+        zoneBadge.className = "px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800";
+      }
+
+      document.getElementById('card-time').textContent = c.time;
+      document.getElementById('card-street').textContent = c.street;
+      document.getElementById('card-note').textContent = c.note || "Sin nota adicional";
+      document.getElementById('note-input').value = "";
+
+      // Botones del modo consulta
+      const btnUpdate = document.getElementById('btn-start-update');
+      btnUpdate.className = `flex-1 py-3.5 px-4 rounded-2xl font-bold text-white ${isP ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/25' : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/25'} active:scale-[0.99] transition shadow-lg flex items-center justify-center gap-2 text-sm`;
+      btnUpdate.innerHTML = `<span>📍 Actualizar ubicación (${isP ? 'Peugeot' : 'Hyundai'})</span>`;
+
+      // Mostrar botón "En Garaje" solo para el Peugeot 508 SW
+      const btnGarage = document.getElementById('btn-garage');
+      if (isP) {
+        btnGarage.classList.remove('hidden');
+      } else {
+        btnGarage.classList.add('hidden');
+      }
+    }
+
+    // 9. Centrar cámara en el coche seleccionado
+    function centerOnCar() {
+      const c = cars[activeCar];
+      if (activeCar === 'peugeot' && c.inGarage) {
+        alert("El Peugeot 508 SW está guardado en el garaje.");
+        return;
+      }
+      map.flyTo([c.lat, c.lng], 18, { duration: 0.7 });
+    }
+
+    // 10. Geolocalización GPS real del móvil
+    function locateUserGPS(callback) {
+      if (!navigator.geolocation) {
+        resetToConstancia14();
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const { latitude, longitude } = pos.coords;
+          if (userMarker) map.removeLayer(userMarker);
+          userMarker = L.circleMarker([latitude, longitude], {
+            radius: 8,
+            fillColor: '#3b82f6',
+            color: '#ffffff',
+            weight: 3,
+            fillOpacity: 1
+          }).addTo(map);
+          map.flyTo([latitude, longitude], 18, { duration: 0.8 });
+          if (callback) callback(latitude, longitude);
+        },
+        () => {
+          resetToConstancia14();
+        },
+        { enableHighAccuracy: true, timeout: 5000 }
+      );
+    }
+
+    // 11. Guardado rápido por Bluetooth (BT_CAR_SISTEM) para el Peugeot 508 SW
+    function bluetoothAutoPark() {
+      selectCar('peugeot');
+      startUpdateMode();
+      document.getElementById('note-input').value = "Aparcado por Bluetooth (BT_CAR_SISTEM)";
+    }
+
+    // 12. Compartir estado y enlace sincronizado por WhatsApp entre iPhone y los 3 Android
+    function shareLocations() {
+      const p = cars.peugeot;
+      const h = cars.hyundai;
+      const baseUrl = window.location.origin + window.location.pathname;
+
+      const syncParams = new URLSearchParams({
+        p_garage: p.inGarage ? '1' : '0',
+        peugeot: `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`,
+        p_street: p.street,
+        p_time: p.time,
+        p_note: p.note,
+        hyundai: `${h.lat.toFixed(6)},${h.lng.toFixed(6)}`,
+        h_street: h.street,
+        h_time: h.time,
+        h_note: h.note
+      });
+      const syncUrl = `${baseUrl}?${syncParams.toString()}`;
+
+      const peugeotText = p.inGarage
+        ? `🚙 Peugeot 508 SW: 🏠 Guardado en el Garaje (${p.time})`
+        : `🚙 Peugeot 508 SW: ${p.street} (${p.time})\n📍 Maps: https://maps.google.com/?q=${p.lat},${p.lng}`;
+
+      const hyundaiText = `🚗 Hyundai i20: ${h.street} (${h.time})\n📍 Maps: https://maps.google.com/?q=${h.lat},${h.lng}`;
+
+      const text = `🚗 Parking Familiar (52 - Prosperidad):\n\n${peugeotText}\n\n${hyundaiText}\n\n🔄 Abrir y actualizar en la App:\n${syncUrl}`;
+
+      if (navigator.share) {
+        navigator.share({ title: 'Ubicación Coches Familia', text, url: syncUrl });
+      } else {
+        navigator.clipboard.writeText(text);
+        alert("Ubicaciones y enlace de sincronización copiados al portapapeles.");
+      }
+    }
+
+    // Asegurar tamaño correcto del mapa al abrir
+    window.addEventListener('load', () => {
+      setTimeout(() => map.invalidateSize(), 150);
+    });
+
+    // Inicializar en Modo Consulta limpio
+    selectCar('peugeot');
+    if (!cars.peugeot.inGarage) {
+      map.setView([cars.peugeot.lat, cars.peugeot.lng], 17);
+    } else {
+      map.setView([cars.hyundai.lat, cars.hyundai.lng], 17);
+    }
+  </script>
+</body>
+</html>
