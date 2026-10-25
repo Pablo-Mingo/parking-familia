@@ -436,7 +436,19 @@
       }
     };
 
-    let cars = JSON.parse(localStorage.getItem('family_parking_prosperidad_v2')) || defaultData;
+    // Sincronización entre móviles: servidor gratuito en Google Apps Script (proyecto "Parking Familia - Sync").
+    // Cada coche lleva updatedAt (ms) y, al juntar datos, siempre gana el más reciente.
+    const SYNC_URL = 'https://script.google.com/macros/s/AKfycbzgxuASmDlTL7ET2CNg1KYLFl2MBEq1vcLxaOTktoQAOdujMcvx5aNNh0pXsPAt4uU/exec';
+    const SYNC_EVERY_MS = 20000;
+    const STORAGE_KEY = 'family_parking_prosperidad_v2';
+    const PENDING_KEY = 'family_parking_sync_pending';
+    // Fecha que se asigna a los datos guardados antes de existir la sincronización
+    const LEGACY_TS = Date.UTC(2026, 9, 1);
+
+    let cars = JSON.parse(localStorage.getItem(STORAGE_KEY)) || defaultData;
+    ['peugeot', 'hyundai'].forEach(k => {
+      if (!(cars[k].updatedAt >= LEGACY_TS)) cars[k].updatedAt = LEGACY_TS;
+    });
     // Nombres visibles (se fuerzan para que los datos guardados con los nombres antiguos se actualicen)
     cars.peugeot.name = "Grande";
     cars.hyundai.name = "Pequeño";
@@ -470,29 +482,38 @@
     let isUpdatingLocation = false;
     let userMarker = null;
 
-    // 1b. Sincronización por parámetros URL (?peugeot=lat,lng&p_garage=1&hyundai=lat,lng)
+    // 1b. Datos recibidos en un enlace compartido (?peugeot=lat,lng&p_garage=1&hyundai=lat,lng&p_ts=...&h_ts=...)
+    // Solo se aplican si son más recientes que lo que ya hay (los enlaces antiguos no llevan fecha).
     const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.has('p_garage') && urlParams.get('p_garage') === '1') {
-      cars.peugeot.inGarage = true;
-      if (urlParams.has('p_time')) cars.peugeot.time = urlParams.get('p_time');
-      if (urlParams.has('p_note')) cars.peugeot.note = urlParams.get('p_note');
-    } else if (urlParams.has('peugeot')) {
-      const [pLat, pLng] = urlParams.get('peugeot').split(',').map(Number);
-      if (!isNaN(pLat) && !isNaN(pLng)) {
-        cars.peugeot.inGarage = false;
-        cars.peugeot.lat = pLat;
-        cars.peugeot.lng = pLng;
-        if (urlParams.has('p_street')) cars.peugeot.street = urlParams.get('p_street');
+    const urlTs = (name) => Number(urlParams.get(name)) || LEGACY_TS + 1;
+    const pTs = urlTs('p_ts');
+    if (pTs > cars.peugeot.updatedAt) {
+      if (urlParams.get('p_garage') === '1') {
+        cars.peugeot.inGarage = true;
+        cars.peugeot.updatedAt = pTs;
         if (urlParams.has('p_time')) cars.peugeot.time = urlParams.get('p_time');
         if (urlParams.has('p_note')) cars.peugeot.note = urlParams.get('p_note');
+      } else if (urlParams.has('peugeot')) {
+        const [pLat, pLng] = urlParams.get('peugeot').split(',').map(Number);
+        if (!isNaN(pLat) && !isNaN(pLng)) {
+          cars.peugeot.inGarage = false;
+          cars.peugeot.lat = pLat;
+          cars.peugeot.lng = pLng;
+          cars.peugeot.updatedAt = pTs;
+          if (urlParams.has('p_street')) cars.peugeot.street = urlParams.get('p_street');
+          if (urlParams.has('p_time')) cars.peugeot.time = urlParams.get('p_time');
+          if (urlParams.has('p_note')) cars.peugeot.note = urlParams.get('p_note');
+        }
       }
     }
 
-    if (urlParams.has('hyundai')) {
+    const hTs = urlTs('h_ts');
+    if (urlParams.has('hyundai') && hTs > cars.hyundai.updatedAt) {
       const [hLat, hLng] = urlParams.get('hyundai').split(',').map(Number);
       if (!isNaN(hLat) && !isNaN(hLng)) {
         cars.hyundai.lat = hLat;
         cars.hyundai.lng = hLng;
+        cars.hyundai.updatedAt = hTs;
         if (urlParams.has('h_street')) cars.hyundai.street = urlParams.get('h_street');
         if (urlParams.has('h_time')) cars.hyundai.time = urlParams.get('h_time');
         if (urlParams.has('h_note')) cars.hyundai.note = urlParams.get('h_note');
@@ -509,7 +530,7 @@
         cars.peugeot.note = GARAGE_NOTE;
       }
     }
-    localStorage.setItem('family_parking_prosperidad_v2', JSON.stringify(cars));
+    saveLocal();
 
     // 2. Inicializar Mapa Real con OpenStreetMap Oficial (Sin bloqueos de API Key)
     const map = L.map('map', {
@@ -781,28 +802,28 @@
     function confirmParkAtCenter() {
       const center = map.getCenter();
       const noteVal = document.getElementById('note-input').value.trim();
-      const now = new Date();
-      const timeStr = `Hoy, ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const carKey = activeCar;
+      const now = Date.now();
 
       fetchStreetName(center.lat, center.lng, (streetName) => {
-        cars[activeCar].inGarage = false;
-        cars[activeCar].lat = center.lat;
-        cars[activeCar].lng = center.lng;
-        cars[activeCar].street = streetName;
-        cars[activeCar].time = timeStr;
-        cars[activeCar].note = noteVal || "Aparcado en la calle";
+        const c = cars[carKey];
+        c.inGarage = false;
+        c.lat = center.lat;
+        c.lng = center.lng;
+        c.street = streetName;
+        c.updatedAt = now;
+        c.time = timeLabel(c);
+        c.note = noteVal || "Aparcado en la calle";
 
-        localStorage.setItem('family_parking_prosperidad_v2', JSON.stringify(cars));
+        saveLocal();
         renderCarMarkers();
         cancelUpdateMode();
+        pushToServer([carKey]);
       });
     }
 
     // 7. Guardar el coche Grande directamente en el Garaje
     function parkPeugeotInGarage() {
-      const now = new Date();
-      const timeStr = `Hoy, ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-
       if (cars.peugeot.inGarage) {
         flyToGarage();
         return;
@@ -812,14 +833,99 @@
       cars.peugeot.lat = GARAGE.lat;
       cars.peugeot.lng = GARAGE.lng;
       cars.peugeot.street = GARAGE_STREET;
-      cars.peugeot.time = timeStr;
+      cars.peugeot.updatedAt = Date.now();
+      cars.peugeot.time = timeLabel(cars.peugeot);
       cars.peugeot.note = GARAGE_NOTE;
 
-      localStorage.setItem('family_parking_prosperidad_v2', JSON.stringify(cars));
+      saveLocal();
       renderCarMarkers();
       cancelUpdateMode();
       map.flyTo([GARAGE.lat, GARAGE.lng], 18, { duration: 0.7 });
       showToast(`✅ ${cars.peugeot.name} guardado en el garaje`);
+      pushToServer(['peugeot']);
+    }
+
+    // 7b. Sincronización con el servidor compartido
+    function saveLocal() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(cars));
+    }
+
+    // "Hoy, 10:15" / "Ayer, 20:40" / "23/10, 18:05" a partir de updatedAt
+    // (los datos antiguos sin fecha real conservan su texto guardado)
+    function timeLabel(c) {
+      if (!(c.updatedAt > LEGACY_TS + 1)) return c.time || "";
+      const d = new Date(c.updatedAt);
+      const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const day = new Date(d); day.setHours(0, 0, 0, 0);
+      const diffDays = Math.round((today - day) / 86400000);
+      if (diffDays === 0) return `Hoy, ${hhmm}`;
+      if (diffDays === 1) return `Ayer, ${hhmm}`;
+      return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}, ${hhmm}`;
+    }
+
+    // Aplica los datos del servidor que sean más recientes que los locales
+    function applyRemote(remote) {
+      let changed = false;
+      ['peugeot', 'hyundai'].forEach(k => {
+        const r = remote && remote[k];
+        if (!r || !(r.updatedAt >= LEGACY_TS) || r.updatedAt <= cars[k].updatedAt) return;
+        const { lat, lng, street, note, time, inGarage, updatedAt } = r;
+        Object.assign(cars[k], { lat, lng, street, note, time, inGarage: k === 'peugeot' && inGarage, updatedAt });
+        changed = true;
+      });
+      if (!changed) return;
+      saveLocal();
+      renderCarMarkers();
+      // En modo actualizar no tocamos el panel (se perdería la nota que se está escribiendo)
+      if (!isUpdatingLocation) selectCar(activeCar);
+    }
+
+    function carsPayload(keys) {
+      const out = {};
+      keys.forEach(k => {
+        const { lat, lng, street, note, time, inGarage, updatedAt } = cars[k];
+        out[k] = { lat, lng, street, note, time, inGarage, updatedAt };
+      });
+      return out;
+    }
+
+    // Envía los coches al servidor; si no hay conexión queda pendiente y se reintenta
+    async function pushToServer(keys = ['peugeot', 'hyundai'], quiet = false) {
+      try {
+        // text/plain evita la petición previa CORS, que Apps Script no admite
+        const res = await fetch(SYNC_URL, { method: 'POST', body: JSON.stringify(carsPayload(keys)) });
+        if (!res.ok) throw new Error(res.status);
+        localStorage.removeItem(PENDING_KEY);
+        applyRemote(await res.json());
+      } catch (e) {
+        localStorage.setItem(PENDING_KEY, '1');
+        if (!quiet) showToast("📶 Sin conexión: se compartirá con la familia al recuperarla");
+      }
+    }
+
+    let pulling = false;
+    async function pullFromServer() {
+      if (pulling) return;
+      pulling = true;
+      try {
+        // Si había cambios sin enviar, se envían primero (el servidor se queda con lo más reciente)
+        if (localStorage.getItem(PENDING_KEY)) {
+          await pushToServer(undefined, true);
+          return;
+        }
+        const res = await fetch(`${SYNC_URL}?t=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const remote = await res.json();
+        applyRemote(remote);
+        // Si el servidor no tiene algún coche (o lo tiene más antiguo), le mandamos el nuestro
+        const stale = ['peugeot', 'hyundai'].filter(k => !(remote[k] && remote[k].updatedAt >= cars[k].updatedAt));
+        if (stale.length) await pushToServer(stale, true);
+      } catch (e) {
+        // Sin conexión: se reintenta en la siguiente vuelta
+      } finally {
+        pulling = false;
+      }
     }
 
     // 8. Cambiar entre Grande y Pequeño
@@ -857,7 +963,7 @@
         zoneBadge.className = "px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800";
       }
 
-      document.getElementById('card-time').textContent = c.time;
+      document.getElementById('card-time').textContent = timeLabel(c);
       document.getElementById('card-street').textContent = c.street;
       document.getElementById('card-note').textContent = c.note || "Sin nota adicional";
       document.getElementById('note-input').value = "";
@@ -946,20 +1052,22 @@
         p_garage: p.inGarage ? '1' : '0',
         peugeot: `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`,
         p_street: p.street,
-        p_time: p.time,
+        p_time: timeLabel(p),
+        p_ts: String(p.updatedAt),
         p_note: p.note,
         hyundai: `${h.lat.toFixed(6)},${h.lng.toFixed(6)}`,
         h_street: h.street,
-        h_time: h.time,
+        h_time: timeLabel(h),
+        h_ts: String(h.updatedAt),
         h_note: h.note
       });
       const syncUrl = `${baseUrl}?${syncParams.toString()}`;
 
       const peugeotText = p.inGarage
-        ? `🚙 Grande: 🏠 En el garaje · ${GARAGE.label}, ${GARAGE.city} (${p.time})\n📍 Maps: https://maps.google.com/?q=${GARAGE.lat},${GARAGE.lng}`
-        : `🚙 Grande: ${p.street} (${p.time})\n📍 Maps: https://maps.google.com/?q=${p.lat},${p.lng}`;
+        ? `🚙 Grande: 🏠 En el garaje · ${GARAGE.label}, ${GARAGE.city} (${timeLabel(p)})\n📍 Maps: https://maps.google.com/?q=${GARAGE.lat},${GARAGE.lng}`
+        : `🚙 Grande: ${p.street} (${timeLabel(p)})\n📍 Maps: https://maps.google.com/?q=${p.lat},${p.lng}`;
 
-      const hyundaiText = `🚗 Pequeño: ${h.street} (${h.time})\n📍 Maps: https://maps.google.com/?q=${h.lat},${h.lng}`;
+      const hyundaiText = `🚗 Pequeño: ${h.street} (${timeLabel(h)})\n📍 Maps: https://maps.google.com/?q=${h.lat},${h.lng}`;
 
       const text = `🚗 Parking Familiar (52 - Prosperidad):\n\n${peugeotText}\n\n${hyundaiText}\n\n🔄 Abrir y actualizar en la App:\n${syncUrl}`;
 
@@ -980,6 +1088,12 @@
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch(() => {});
     }
+
+    // Mantener los datos al día: al abrir, al volver a la app, al recuperar conexión y cada 20 s
+    pullFromServer();
+    setInterval(() => { if (document.visibilityState === 'visible') pullFromServer(); }, SYNC_EVERY_MS);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') pullFromServer(); });
+    window.addEventListener('online', pullFromServer);
 
     // Inicializar en Modo Consulta limpio
     // (si el Grande está en el garaje, sus coordenadas ya son las del garaje)

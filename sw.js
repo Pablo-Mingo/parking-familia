@@ -1,6 +1,6 @@
 // Service worker: permite instalar la app y abrirla aunque no haya cobertura.
 // Estrategia "red primero": siempre intenta la versión nueva y, si falla, usa la guardada.
-const CACHE = 'parking-familia-v4';
+const CACHE = 'parking-familia-v5';
 const APP_SHELL = [
   './',
   './index.html',
@@ -35,6 +35,8 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   // Mapas y geocodificación siempre en directo (no se guardan)
   if (url.hostname.endsWith('openstreetmap.org')) return;
+  // Datos compartidos de los coches: siempre del servidor, nunca de la caché
+  if (url.hostname.endsWith('script.google.com') || url.hostname.endsWith('googleusercontent.com')) return;
 
   event.respondWith(
     fetch(req)
