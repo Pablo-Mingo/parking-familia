@@ -1,6 +1,6 @@
 // Service worker: permite instalar la app y abrirla aunque no haya cobertura.
 // Estrategia "red primero": siempre intenta la versión nueva y, si falla, usa la guardada.
-const CACHE = 'parking-familia-v3';
+const CACHE = 'parking-familia-v4';
 const APP_SHELL = [
   './',
   './index.html',

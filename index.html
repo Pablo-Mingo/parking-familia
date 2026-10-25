@@ -285,6 +285,13 @@
       <span id="garage-fab-dot" class="hidden absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-amber-400 border-2 border-white"></span>
     </button>
 
+    <!-- Botón de cambio rápido de coche (muestra el otro coche; al pulsarlo lo selecciona y centra) -->
+    <button id="switch-fab" onclick="quickSwitchCar()" title="Cambiar a Pequeño"
+      class="w-12 h-12 rounded-2xl bg-emerald-600 text-white shadow-xl flex flex-col items-center justify-center border-2 border-white active:scale-95 transition">
+      <span id="switch-fab-icon" class="w-8 h-4"></span>
+      <span id="switch-fab-label" class="text-[8px] font-bold leading-none mt-1">PEQUEÑO</span>
+    </button>
+
     <!-- Botón de Aparcado Automático Bluetooth (coche Grande - BT_CAR_SISTEM) -->
     <button onclick="bluetoothAutoPark()" title="Aparcado rápido por Bluetooth (BT_CAR_SISTEM)"
       class="w-12 h-12 rounded-2xl bg-indigo-600 text-white shadow-xl flex flex-col items-center justify-center border-2 border-white active:scale-95 transition">
@@ -867,6 +874,22 @@
       btnGarage.className = `${isP ? '' : 'hidden '}py-3.5 px-4 rounded-2xl font-bold ${inGarage ? 'text-amber-950 bg-amber-400 hover:bg-amber-300' : 'text-amber-900 bg-amber-100 hover:bg-amber-200'} active:scale-[0.99] transition flex items-center justify-center gap-1.5 text-xs sm:text-sm whitespace-nowrap`;
       btnGarage.innerHTML = inGarage ? '<span>✓ En garaje</span>' : '<span>🏠 En Garaje</span>';
       btnGarage.title = inGarage ? `Está en el garaje (${GARAGE.label})` : `Guardar en el garaje (${GARAGE.label})`;
+
+      // Botón lateral de cambio rápido: muestra el otro coche con su color
+      const otherKey = isP ? 'hyundai' : 'peugeot';
+      const switchFab = document.getElementById('switch-fab');
+      switchFab.classList.toggle('bg-emerald-600', isP);
+      switchFab.classList.toggle('bg-blue-600', !isP);
+      switchFab.title = `Cambiar a ${cars[otherKey].name}`;
+      document.getElementById('switch-fab-icon').innerHTML = carSvg(otherKey);
+      document.getElementById('switch-fab-label').textContent = cars[otherKey].name.toUpperCase();
+    }
+
+    // 8b. Cambio rápido al otro coche desde el botón lateral
+    function quickSwitchCar() {
+      selectCar(activeCar === 'peugeot' ? 'hyundai' : 'peugeot');
+      // En modo actualizar no movemos el mapa: el puntero se queda donde estaba
+      if (!isUpdatingLocation) centerOnCar();
     }
 
     // 9. Centrar cámara en el coche seleccionado
